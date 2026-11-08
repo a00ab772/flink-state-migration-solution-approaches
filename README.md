@@ -56,8 +56,6 @@ Moving complex or frequently migrated state out of Flink's native managed state 
 
 [ExternalizedStateJobTest.java](src/test/java/com/statemigration/flink/externalstore/ExternalizedStateJobTest.java)
 
-(WIP)
-
 ## 4. **Dual-pipeline blue-green state migration**: Running two parallel pipelines (old and new) during a migration period, allowing for gradual state transfer and validation.
 
 When a configuration change introduces a breaking state change (e.g., changing the windowing strategy or reshaping the aggregate key entirely), upcasting is impossible. You must migrate the data cleanly.
@@ -71,6 +69,22 @@ b. Run the old pipeline and the new pipeline in parallel for a transition window
 c. For historical state bootstrapping, use a batch job or a side-load mechanism to read existing state/sinks, transform it into the new schema format, and inject it into the new pipeline's state backend or sink storage.
 
 d. Once caught up, drain and terminate the old pipeline.
+
+This is considered in literature as the gold standard for zero-downtime, high-risk migrations in enterprise streaming architectures.
+
+Why it shines over the other approaches is that, when breaking changes are too radical for Upcasting (Strategy 1) or when externalizing state (Strategy 3) isn't enough because the topology itself changes (e.g., changing key-by groupings, window slide/sizes, or data structures entirely), modifying savepoints becomes mathematically impossible as you most probably have experienced with the real product platform that you are building. The beauty of this approach is that, running parallel pipelines bypasses Flink's internal savepoint dependency graph completely.
+
+Of course this approach also comes with a Trade-off: It introduces operational complexity. You must manage dual consumer groups on Kafka, handle idempotent sinks so downstream systems don't receive duplicate data during the transition window, and build a side-loading/bootstrap mechanism to backfill historical state into the new topology.
+
+(WIP)
+
+[StateMigrationBlueGreenJob.java](src/main/java/com/statemigration/flink/bluegreen/StateMigrationBlueGreenJob.java)
+
+[StateMigrationBlueGreenJobTest.java](src/main/java/com/statemigration/flink/bluegreen/StateMigrationBlueGreenJobTest.java)
+
+
+(Work in progress ....)
+
 
 
 ## 5. **Versioned State**: Maintaining multiple versions of state and handling them appropriately during restore.

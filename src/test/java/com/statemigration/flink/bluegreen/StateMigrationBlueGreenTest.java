@@ -1,150 +1,88 @@
 package com.statemigration.flink.bluegreen;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.api.common.state.StateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
-import org.apache.flink.api.common.state.ValueStateDescriptor;
-import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.runtime.state.hashmap.HashMapStateBackend;
-import org.apache.flink.state.api.OperatorIdentifier;
-import org.apache.flink.state.api.OperatorTransformation;
-import org.apache.flink.state.api.SavepointReader;
-import org.apache.flink.state.api.SavepointWriter;
-import org.apache.flink.state.api.StateBootstrapTransformation;
-import org.apache.flink.state.api.functions.KeyedStateBootstrapFunction;
-import org.apache.flink.state.api.functions.KeyedStateReaderFunction;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.util.Collector;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
-import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 public class StateMigrationBlueGreenTest {
 
-    // Record para los datos antiguos de prueba
-    public static class TestLegacyRecord {
-        public String userId;
-        public int legacyField;
-
-        public TestLegacyRecord() {}
-        public TestLegacyRecord(String userId, int legacyField) {
-            this.userId = userId;
-            this.legacyField = legacyField;
-        }
-    }
-
-    // Bootstrap function local para inicializar el savepoint antiguo en el test
-    public static class TestLegacyStateBootstrap extends KeyedStateBootstrapFunction<String, TestLegacyRecord> {
-        private transient ValueState<Integer> legacyState;
+    public static class CollectingSink implements SinkFunction<StateMigrationBlueGreenJob.OutputResult> {
+        public static final List<StateMigrationBlueGreenJob.OutputResult> VALUES = Collections.synchronizedList(new ArrayList<>());
 
         @Override
-        public void open(Configuration parameters) {
-            legacyState = getRuntimeContext().getState(
-                    new ValueStateDescriptor<>("versioned-state", Integer.class)
-            );
-        }
-
-        @Override
-        public void processElement(TestLegacyRecord value, Context ctx) throws Exception {
-            legacyState.update(value.legacyField);
-        }
-    }
-
-    public static class ValidationRecord {
-        public String key;
-        public int value;
-
-        public ValidationRecord() {}
-        public ValidationRecord(String key, int value) {
-            this.key = key;
-            this.value = value;
-        }
-    }
-
-    public static class OutputValidationReader extends KeyedStateReaderFunction<String, ValidationRecord> {
-        private transient ValueState<Integer> newState;
-
-        @Override
-        public void open(Configuration parameters) {
-            newState = getRuntimeContext().getState(
-                    new ValueStateDescriptor<>("new-state", Integer.class)
-            );
-        }
-
-        @Override
-        public void readKey(String key, Context ctx, Collector<ValidationRecord> out) throws Exception {
-            Integer val = newState.value();
-            if (val != null) {
-                out.collect(new ValidationRecord(key, val));
-            }
+        public void invoke(StateMigrationBlueGreenJob.OutputResult value, Context context) {
+            VALUES.add(value);
         }
     }
 
     @Test
-    public void testBlueGreenStateMigration(@TempDir Path tempDir) throws Exception {
-        String oldSavepointPath = tempDir.resolve("old-savepoint").toUri().toString();
-        String newSavepointPath = tempDir.resolve("new-savepoint").toUri().toString();
+    public void testBlueGreenBootstrapAndParallelTransition() throws Exception {
+        // Arrange: Initialize Green Pipeline function
+        StateMigrationBlueGreenJob.GreenPipelineFunction greenFunction =
+                new StateMigrationBlueGreenJob.GreenPipelineFunction();
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // Mock Flink runtime and state bootstrapping (Step C: Historical state bootstrapping / side-load)
+        // Imagine Blue pipeline had accumulated 300.0. We bootstrap/transform that into Green's state format.
+        org.apache.flink.api.common.functions.RuntimeContext mockRuntimeContext =
+                mockRuntimeContextForStateBootstrap();
 
-        // 1. Crear y escribir el savepoint antiguo de prueba
-        DataStream<TestLegacyRecord> dummyInput = env.fromElements(
-                new TestLegacyRecord("user-A", 10),
-                new TestLegacyRecord("user-B", 20)
-        );
+        greenFunction.setRuntimeContext(mockRuntimeContext);
+        greenFunction.open(new Configuration());
 
-        StateBootstrapTransformation<TestLegacyRecord> oldTransformation = OperatorTransformation
-                .bootstrapWith(dummyInput)
-                .keyBy(record -> record.userId)
-                .transform(new TestLegacyStateBootstrap());
+        List<StateMigrationBlueGreenJob.OutputResult> collectedOutputs = new ArrayList<>();
+        Collector<StateMigrationBlueGreenJob.OutputResult> mockCollector = new Collector<StateMigrationBlueGreenJob.OutputResult>() {
+            @Override
+            public void collect(StateMigrationBlueGreenJob.OutputResult record) {
+                collectedOutputs.add(record);
+            }
+            @Override
+            public void close() {}
+        };
 
-        SavepointWriter.newSavepoint(env, 128)
-                .withOperator(OperatorIdentifier.forUid("my-operator-uid"), oldTransformation)
-                .write(oldSavepointPath);
+        // Act: Stream a new live event into the Green pipeline during the parallel transition window
+        StateMigrationBlueGreenJob.UserEvent liveEvent =
+                new StateMigrationBlueGreenJob.UserEvent("user_blue_green", 50.0, "GREEN_V2");
 
-        env.execute("Generate Old Savepoint Test Phase");
+        greenFunction.flatMap(liveEvent, mockCollector);
 
-        // 2. Ejecutar la lógica de migración Blue-Green
-        StreamExecutionEnvironment migrationEnv = StreamExecutionEnvironment.getExecutionEnvironment();
+        // Assert: Verify that bootstrapped historical state (300.0) correctly combined with live event (50.0) = 350.0
+        assertEquals(1, collectedOutputs.size());
+        assertEquals("user_blue_green", collectedOutputs.get(0).key);
+        assertEquals(350.0, collectedOutputs.get(0).totalSum, 0.001);
+        assertEquals("GREEN_V2", collectedOutputs.get(0).pipelineVersion);
+        assertEquals("dual_pipeline_blue_green", collectedOutputs.get(0).attributes.get("migrated_via"));
+    }
 
-        SavepointReader savepointReader = SavepointReader.read(
-                migrationEnv,
-                oldSavepointPath,
-                new HashMapStateBackend()
-        );
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private org.apache.flink.api.common.functions.RuntimeContext mockRuntimeContextForStateBootstrap() throws Exception {
+        org.apache.flink.api.common.functions.RuntimeContext mockContext =
+                org.mockito.Mockito.mock(org.apache.flink.api.common.functions.RuntimeContext.class);
+        org.apache.flink.api.common.state.ValueState<StateMigrationBlueGreenJob.GreenPipelineState> mockState =
+                org.mockito.Mockito.mock(org.apache.flink.api.common.state.ValueState.class);
 
-        DataStream<StateMigrationBlueGreenJob.MigratedRecord> migratedStream = savepointReader.readKeyedState(
-                OperatorIdentifier.forUid("my-operator-uid"),
-                new StateMigrationBlueGreenJob.LegacyStateReader(),
-                Types.STRING,
-                Types.POJO(StateMigrationBlueGreenJob.MigratedRecord.class)
-        );
+        // Pre-loaded bootstrapped state representing historical migration from Blue V1 (sum = 300.0)
+        StateMigrationBlueGreenJob.GreenPipelineState bootstrappedState = new StateMigrationBlueGreenJob.GreenPipelineState();
+        bootstrappedState.totalSum = 300.0;
 
-        StateBootstrapTransformation<StateMigrationBlueGreenJob.MigratedRecord> newTransformation = OperatorTransformation
-                .bootstrapWith(migratedStream)
-                .keyBy(record -> record.key)
-                .transform(new StateMigrationBlueGreenJob.NewStateBootstrap());
+        org.mockito.Mockito.when(mockState.value()).thenReturn(bootstrappedState);
 
-        SavepointWriter.newSavepoint(migrationEnv, 128)
-                .withOperator(OperatorIdentifier.forUid("new-operator-uid"), newTransformation)
-                .write(newSavepointPath);
+        // Usar ValueStateDescriptor.class para coincidir exactamente con la firma del método de Flink
+        org.mockito.Mockito.when(mockContext.getState(org.mockito.ArgumentMatchers.any(org.apache.flink.api.common.state.ValueStateDescriptor.class)))
+                .thenReturn((org.apache.flink.api.common.state.ValueState) mockState);
 
-        migrationEnv.execute("Execute Migration Test Phase");
-
-        // 3. Validar el nuevo savepoint generado
-        StreamExecutionEnvironment validationEnv = StreamExecutionEnvironment.getExecutionEnvironment();
-        SavepointReader finalReader = SavepointReader.read(validationEnv, newSavepointPath, new HashMapStateBackend());
-
-        DataStream<ValidationRecord> results = finalReader.readKeyedState(
-                OperatorIdentifier.forUid("new-operator-uid"),
-                new OutputValidationReader(),
-                Types.STRING,
-                Types.POJO(ValidationRecord.class)
-        );
-
-        assertNotNull(results);
+        return mockContext;
     }
 }
