@@ -52,6 +52,11 @@ Moving complex or frequently migrated state out of Flink's native managed state 
 
 * Limitation: This approach introduces external dependencies, potential latency, and operational complexity.
 
+[ExternalizedStateJob.java](src/main/java/com/statemigration/flink/externalstore/ExternalizedStateJob.java)
+
+[ExternalizedStateJobTest.java](src/test/java/com/statemigration/flink/externalstore/ExternalizedStateJobTest.java)
+
+(WIP)
 
 ## 4. **Dual-pipeline blue-green state migration**: Running two parallel pipelines (old and new) during a migration period, allowing for gradual state transfer and validation.
 
@@ -68,13 +73,13 @@ c. For historical state bootstrapping, use a batch job or a side-load mechanism 
 d. Once caught up, drain and terminate the old pipeline.
 
 
-## 2. **Versioned State**: Maintaining multiple versions of state and handling them appropriately during restore.
+## 5. **Versioned State**: Maintaining multiple versions of state and handling them appropriately during restore.
 
-## 3. **State Serialization**: Using a serialization framework that supports schema evolution, such as Avro or Protobuf.
+## 6. **State Serialization**: Using a serialization framework that supports schema evolution, such as Avro or Protobuf.
 
-## 4. **State Migration Tooling**: Leveraging Flink's state migration tooling, such as the State Processor API, to facilitate state migration.
+## 7. **State Migration Tooling**: Leveraging Flink's state migration tooling, such as the State Processor API, to facilitate state migration.
 
-
+...
 
 
 ## Project setup
