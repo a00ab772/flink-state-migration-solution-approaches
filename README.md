@@ -208,8 +208,7 @@ Here is a comprehensive summary table comparing all 7 Apache Flink state migrati
 | 6. State Serialization (Avro/Protobuf) | Delegating evolution to a binary format with default fields. | Zero application boilerplate; robust compatibility enforcement. | Strict rules (removing fields without defaults causes hard failures). | Pipelines standardizing on enterprise IDLs (Avro/Protobuf). |
 | 7. State Processor API | Treating savepoints as batch datasets to transform state off-cluster. | Keeps streaming code clean; ideal for massive state restructuring. | Requires writing separate batch migration jobs and version alignment. | Large-scale state restructuring without touching live streaming code. |
 | 8. Flink SQL & Declarative Schema Evolution | Managing stateful queries declaratively via SQL DDL and schema registries. | Zero Java boilerplate; native integration with schema registries. | Less low-level control over state structures; requires catalog setup. | Real-time analytics, ETL, and SQL-first streaming architectures. |
-| Maximum binary-level performance & control | Strategy 9 (Custom TypeSerializer & Snapshot Migration) |
-
+| 9. Custom TypeSerializer & Snapshot Migration | Writing custom `TypeSerializer` and snapshot classes to handle binary layouts and migration on restore. | Maximum binary-level performance and complete control over layouts. | Extreme implementation complexity; high risk of state corruption if mishandled. | Core infrastructure requiring absolute byte-level performance and control. |
 ## Which strategy is right for you?
 
 Choosing the ideal state migration strategy depends on your team's specific trade-offs regarding operational complexity, downtime tolerance, frequency of schema changes, and the severity of the structural change.
