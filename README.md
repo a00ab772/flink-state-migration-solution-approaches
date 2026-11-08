@@ -125,14 +125,32 @@ Cons
 
 [AvroStateSerializationJobTest.java](src/test/java/com/statemigration/flink/serialization/avro/AvroStateSerializationJobTest.java)
 
-(Work in progress ....)
-
 ## 7. State Migration Tooling: Leveraging Flink's state migration tooling, such as the State Processor API, to facilitate state migration.
 
-...
+### Approach 7: State Migration Tooling (The State Processor API)
+
+This strategy leverages Apache Flink's State Processor API to perform out-of-band state migrations offline. Instead of modifying your live-streaming pipeline to handle complex upcasting logic or wrapper classes, the State Processor API treats Flink savepoints as batch datasets.
+
+You can read an existing savepoint using Flink's Batch/DataSet API, transform or map the old state records into the new schema structure, and write out a brand-new savepoint—all while the streaming pipeline is completely offline or scaled down.
+
+Pros:
+
+* Zero Production Downtime/Risk for Upcasting Code: Your streaming job code remains clean and simple, completely free of messy conditional upcasting blocks, version wrappers, or schema-transition logic.
+* Batch-Scale Processing: Ideal for massive state sizes, allowing you to repartition, clean, or completely restructure state off-cluster using powerful batch operations.
+* Separation of Concerns: Schema migration becomes a standalone maintenance script or batch pipeline rather than a continuous burden on your real-time stream processing code.
+
+Cons:
+
+* Operational Complexity: Requires writing and maintaining a separate batch Flink job specifically for processing savepoints.
+* Maintenance Window: Requires stopping the streaming job (or forking it), executing the batch migration job to write a new savepoint, and restarting the stream from the migrated savepoint.
+* API Version Sensitivity: The structure and format of savepoints can change across major Flink versions, requiring careful alignment of dependencies for the State Processor API.
+
+[StateProcessorMigrationJob.java](src/main/java/com/statemigration/flink/stateprocessor/StateProcessorMigrationJob.java)
+
+[StateProcessorMigrationTest.java](src/test/java/com/statemigration/flink/stateprocessor/StateProcessorMigrationTest.java
 
 
-## Project setup
+# Project setup
 
 ```shell
 user@DESKTOP-SCNMK3I UCRT64 ~/Documents/FlinkProjects
