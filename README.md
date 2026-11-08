@@ -145,6 +145,26 @@ Cons:
 
 [StateProcessorMigrationTest.java](src/test/java/com/statemigration/flink/stateprocessor/StateProcessorMigrationTest.java)
 
+## Approach 8: Flink SQL & Declarative Schema Evolution.
+
+Instead of writing imperative Java code, manual upcasters, or managing low-level state descriptors, Flink SQL shifts the responsibility of schema evolution to declarative DDL statements, catalogs, and format schema registries (like Confluent Schema Registry with Avro/JSON).
+
+How it works: Stateful operations (such as GROUP BY aggregations or windowing) are defined using SQL queries. The underlying state (stored in RocksDB or HashMap) is managed automatically by Flink's Table API planner. 
+
+When schemas evolve, you update the Table DDL or rely on a central Schema Registry to handle backward/forward compatibility rules dynamically at the connector/format level.
+
+Pros:
+
+ Zero Java Boilerplate: No custom ValueState, wrappers, or manual upcasting code required.
+ Declarative Schema Management: Changes are expressed cleanly via SQL DDL or schema registry updates.
+ Built-in Compatibility Handling: Formats like avro-confluent handle field additions and default values natively.
+
+Cons:
+
+ Less Low-Level Control: You give up fine-grained procedural control over custom state structures and state TTL customization compared to the DataStream API.
+ Ecosystem Dependency: Requires setting up a robust SQL Catalog and external schema infrastructure (like Kafka + Schema Registry).
+
+Best Use Case: Modern event-driven architectures built around real-time analytics, ETL, and streaming data lakes where business logic is expressed cleanly in SQL rather than complex Java/Scala code.
 
 ## Wrapping Up
 
@@ -152,14 +172,14 @@ Here is a comprehensive summary table comparing all 7 Apache Flink state migrati
 
 | Strategy | Core Mechanism | Main Pros | Main Cons | Best Use Case |
 | --- | --- | --- | --- | --- |
-| 1. Custom State Migration (Upcasting) | Wrapping state in a versioned container (`StateWrapper<T>`) and applying upcasters on restore. | Simple to implement for minor schema additions; stays native to Flink. | Becomes brittle and messy as schema versions multiply; requires restart/savepoint. | Minor, additive changes or simple type widenings in small applications. |
-| 2. State-Agnostic DSL | Using a generic container (`MapState<String, byte[]>`) and evaluating expressions against it via a rules engine. | Flink state schema never changes; fully decouples business logic from state structure. | Higher runtime overhead; debugging expression engines can be complex. | Highly dynamic query platforms where end-users frequently alter configurations. |
-| 3. Externalized State | Storing domain state in an external key-value store or database (e.g., Redis, PostgreSQL). | Allows arbitrary schema changes, ALTER TABLE commands, and out-of-band querying. | Introduces network latency, operational overhead, and distributed consistency risks. | Applications requiring external lookups, dashboard reporting, or shared state across jobs. |
-| 4. Dual-Pipeline Blue-Green | Running old and new pipelines in parallel, backfilling history, and cutting over. | Zero downtime and handles radical topology changes where upcasting is impossible. | High operational complexity (dual consumer groups, idempotent sinks, side-loading logic). | Radical architectural refactors or breaking changes where savepoint manipulation fails. |
-| 5. Versioned State | Explicit `schemaVersion` check on restore to route payload to proper deserializer/upcaster. | Explicit, self-contained, and safe with native Flink checkpoints/savepoints. | Adds boilerplate code wrappers and requires a maintenance window (stop/restart). | Standardized enterprise applications needing controlled, deterministic schema evolution. |
-| 6. State Serialization (Avro/Protobuf) | Delegating evolution to a binary format with default fields and schema resolution. | Zero application boilerplate; robust compatibility enforcement and compact footprints. | Strict rules (removing fields without defaults causes hard failures); build pipeline setup required. | Production pipelines standardizing on enterprise IDLs (Avro/Protobuf) for cross-system contracts. |
-| 7. State Migration Tooling (State Processor API) | Treating Flink savepoints as offline batch datasets to transform state off-cluster. | Keeps streaming job code clean; ideal for massive state re-partitioning and off-cluster operations. | Requires writing separate batch migration jobs and maintaining version alignment. | Large-scale state restructuring or emergency offline patches without modifying streaming code. |
-
+| 1. Custom Upcasting | Wrapping state in a versioned container (`StateWrapper<T>`) and applying upcasters. | Simple for minor additions; stays native to Flink. | Becomes brittle as versions multiply; requires restart/savepoint. | Minor, additive changes in small applications. |
+| 2. State-Agnostic DSL | Using generic containers (`MapState<String, byte[]>` and a rules engine). | Flink state schema never changes; decouples logic from state. | Higher runtime overhead; debugging rules is complex. | Dynamic query platforms where users alter configurations constantly. |
+| 3. Externalized State | Storing state externally in a key-value store (Redis, PostgreSQL). | Allows arbitrary schema changes and out-of-band queries. | Introduces network latency, operational overhead, and split-brain risks. | Applications requiring external lookups or shared multi-app state. |
+| 4. Dual-Pipeline Blue-Green | Running old and new pipelines in parallel, backfilling history, and cutting over. | Zero downtime; handles radical topology changes where upcasting fails. | High operational complexity (dual consumer groups, idempotent sinks). | Radical architectural refactors or breaking key-by changes. |
+| 5. Versioned State | Explicit `schemaVersion` check on restore to route payload. | Explicit, self-contained, and safe with native checkpoints. | Adds boilerplate code wrappers and requires a maintenance window. | Standard enterprise apps needing controlled schema evolution. |
+| 6. State Serialization (Avro/Protobuf) | Delegating evolution to a binary format with default fields. | Zero application boilerplate; robust compatibility enforcement. | Strict rules (removing fields without defaults causes hard failures). | Pipelines standardizing on enterprise IDLs (Avro/Protobuf). |
+| 7. State Processor API | Treating savepoints as batch datasets to transform state off-cluster. | Keeps streaming code clean; ideal for massive state restructuring. | Requires writing separate batch migration jobs and version alignment. | Large-scale state restructuring without touching live streaming code. |
+| 8. Flink SQL & Declarative Schema Evolution | Managing stateful queries declaratively via SQL DDL and schema registries. | Zero Java boilerplate; native integration with schema registries. | Less low-level control over state structures; requires catalog setup. | Real-time analytics, ETL, and SQL-first streaming architectures. |
 
 ## Which strategy is right for you?
 
@@ -190,18 +210,24 @@ Here is a decision framework to help you pinpoint the best fit for your producti
  You want to keep your streaming pipeline code completely clean of migration logic or wrapper classes.
  Why: It shifts migration overhead into a standalone batch job that processes savepoints off-cluster.
 
+### 5. Choose Strategy 8 (Flink SQL & Declarative Schema Evolution) if:
+
+ You are building streaming analytics or ETL pipelines and want to express logic declaratively without writing Java/Scala state code.
+ You want schema updates and projection logic managed transparently by SQL DDL and central schema registries (e.g., Confluent Schema Registry).
+ Why: It eliminates Java state boilerplate entirely while letting the SQL planner and format serializers handle column additions and projections automatically.
+
 ---
 
 ### Summary Checklist for Quick Selection
 
-| If your main constraint is... | The recommended approach is...                                    |
-| --- |-------------------------------------------------------------------|
-| Simplicity for minor field additions | Strategy 5 or 6 (Versioned State / Avro Schema Evolution)     |
-| End-users changing configs constantly | Strategy 2 (State-Agnostic DSL)                               |
+| If your main constraint is... | The recommended approach is... |
+| --- | --- |
+| Simplicity for minor field additions | Strategy 5 or 6 (Versioned State / Avro Schema Evolution) |
+| End-users changing configs constantly | Strategy 2 (State-Agnostic DSL) |
 | Sharing state with external apps/dashboards | Strategy 3 (Externalized State with RocksDB/Redis/PostgreSQL) |
-| Radical architectural/key-by refactors | Strategy 4 (Dual-Pipeline Blue-Green)                         |
-| Massive state restructuring without downtime | Strategy 7 (State Processor API)                              |
-
+| Radical architectural/key-by refactors | Strategy 4 (Dual-Pipeline Blue-Green) |
+| Massive state restructuring without downtime | Strategy 7 (State Processor API) |
+| Declarative queries & zero Java boilerplate | Strategy 8 (Flink SQL & Declarative Schema Evolution) |
 # Project setup
 
 ```shell
