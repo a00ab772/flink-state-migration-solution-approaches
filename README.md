@@ -188,8 +188,11 @@ Cons:
 * Extreme Implementation Complexity: Writing correct, bug-free custom `TypeSerializer` and snapshot classes in Flink is notoriously difficult, requires deep understanding of Flink's internal memory management, and can easily corrupt state if mishandled.
 * High Maintenance Risk: Any future changes to binary layouts must be meticulously accounted for in the snapshot compatibility logic.
 
-
 Best Use Case: Core infrastructure or framework development where teams need maximum performance and precise binary layout control over state without external dependencies.
+
+[TypeSerializerMigrationTest.java](src/main/java/com/statemigration/flink/typeserializer/V2AggregateStateSerializer.java)
+
+[TypeSerializerMigrationTest.java](src/test/java/com/statemigration/flink/typeserializer/TypeSerializerMigrationTest.java)
 
 ## Wrapping Up
 
