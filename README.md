@@ -82,12 +82,31 @@ Of course this approach also comes with a Trade-off: It introduces operational c
 
 [StateMigrationBlueGreenJobTest.java](src/main/java/com/statemigration/flink/bluegreen/StateMigrationBlueGreenJobTest.java)
 
+## 5. **Versioned State**: Maintaining multiple versions of state and handling them appropriately during restore.
+
+This approach handles schema evolution seamlessly in Apache Flink by wrapping domain state with a explicit schema version indicator (like the StateWrapper<T> pattern we used earlier).
+
+This ensures that when your pipeline restarts or restores from a savepoint created by an older version of your code, Flink knows precisely how to upcast or deserialize legacy state structures without failing.
+
+Pros:
+
+* Explicit & Safe: By inspecting schemaVersion, the job precisely identifies the data structure before processing, avoiding cryptic StateSerializationException or deserialization failures on restore.
+* Native Integration: Everything stays within Flink's native checkpoint and savepoint mechanism—no external databases or infrastructure required.
+* Deterministic Upcasting: You control the exact migration path (e.g., mapping old total to new sum) explicitly in code, preventing data loss or silent type corruption.
+
+Cons:
+
+* ConsBoilerplate Overhead: Every state object must be wrapped inside a generic container (StateWrapper<T>), requiring extra code for serialization and casting.
+* Maintenance Debt: As your application evolves through multiple versions (V1 -> V2 -> V3 -> V4), the upcasting logic can accumulate nested conditional blocks.
+* Requires Restart/Savepoint: To apply the migration, you must stop the pipeline, take a savepoint, update the code with the new version handler, and restore.
+
+[VersionedStateModel.java](src/main/java/com/statemigration/flink/versionedstate/VersionedStateModel.java)
+
+[VersionedStateFlatMap.java](src/main/java/com/statemigration/flink/versionedstate/VersionedStateFlatMap.java)
+
+[VersionedStateTest.java](src/test/java/com/statemigration/flink/versionedstate/VersionedStateTest.java)
 
 (Work in progress ....)
-
-
-
-## 5. **Versioned State**: Maintaining multiple versions of state and handling them appropriately during restore.
 
 ## 6. **State Serialization**: Using a serialization framework that supports schema evolution, such as Avro or Protobuf.
 
