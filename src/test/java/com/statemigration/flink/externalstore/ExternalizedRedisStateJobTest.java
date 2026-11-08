@@ -1,44 +1,65 @@
 package com.statemigration.flink.externalstore;
 
-import org.apache.flink.streaming.api.functions.async.ResultFuture;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.util.Collector;
 import org.junit.jupiter.api.Test;
-import io.lettuce.core.RedisFuture;
-import io.lettuce.core.api.async.RedisAsyncCommands;
 
-import java.util.Collections;
-import java.util.concurrent.CompletableFuture;
+import java.util.ArrayList;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 public class ExternalizedRedisStateJobTest {
 
     @Test
-    @SuppressWarnings("unchecked")
-    public void testAsyncInvokeWithMockedRedis() throws Exception {
-        // Arrange
-        ExternalizedRedisStateJob.ExternalizedRedisStateFunction function =
-                new ExternalizedRedisStateJob.ExternalizedRedisStateFunction();
+    public void testExternalizedRedisStateWithMockedClient() throws Exception {
+        // Arrange: Mock the external Redis key-value store interface
+        ExternalizedStateJob.ExternalKeyValueStore mockRedisStore =
+                mock(ExternalizedStateJob.ExternalKeyValueStore.class);
+        ObjectMapper mapper = new ObjectMapper();
 
-        RedisAsyncCommands<String, String> mockCommands = mock(RedisAsyncCommands.class);
-        RedisFuture<String> mockRedisFuture = mock(RedisFuture.class);
+        // 1. Pre-seed legacy state stored externally in Redis (sum = 300.0, region = "EU")
+        ExternalizedStateJob.DomainState legacyState = new ExternalizedStateJob.DomainState();
+        legacyState.sum = 300.0;
+        legacyState.attributes.put("region", "EU");
+        byte[] serializedLegacyBytes = mapper.writeValueAsBytes(legacyState);
 
-        CompletableFuture<String> completedFuture = CompletableFuture.completedFuture("{\"tier\":\"gold\"}");
-        when(mockRedisFuture.toCompletableFuture()).thenReturn(completedFuture);
-        when(mockCommands.get("user_1")).thenReturn(mockRedisFuture);
+        when(mockRedisStore.get("user_redis_v1")).thenReturn(serializedLegacyBytes);
 
-        java.lang.reflect.Field field = ExternalizedRedisStateJob.ExternalizedRedisStateFunction.class.getDeclaredField("asyncCommands");
-        field.setAccessible(true);
-        field.set(function, mockCommands);
+        // 2. Instantiate the job flat map function with the Redis store adapter
+        ExternalizedStateJob.ExternalizedStateFlatMapFunction function =
+                new ExternalizedStateJob.ExternalizedStateFlatMapFunction(mockRedisStore);
 
-        ResultFuture<String> mockResultFuture = mock(ResultFuture.class);
-        ExternalizedRedisStateJob.StreamEvent event = new ExternalizedRedisStateJob.StreamEvent("user_1", "click");
+        function.open(new Configuration());
 
-        // Act
-        function.asyncInvoke(event, mockResultFuture);
+        List<ExternalizedStateJob.OutputResult> collectedOutputs = new ArrayList<>();
+        Collector<ExternalizedStateJob.OutputResult> mockCollector = new Collector<ExternalizedStateJob.OutputResult>() {
+            @Override
+            public void collect(ExternalizedStateJob.OutputResult record) {
+                collectedOutputs.add(record);
+            }
+            @Override
+            public void close() {}
+        };
 
-        // Assert
-        verify(mockResultFuture, times(1)).complete(
-                Collections.singleton("Processed user user_1 with external state: {\"tier\":\"gold\"}")
-        );
+        // Act: Send a new incoming event adding 50.0 and a new schema dimension ("tier")
+        ExternalizedStateJob.UserInputEvent incomingEvent =
+                new ExternalizedStateJob.UserInputEvent("user_redis_v1", 50.0, "tier");
+
+        function.flatMap(incomingEvent, mockCollector);
+
+        // Assert: Verify numeric accumulation (300.0 + 50.0 = 350.0) and schema evolution
+        assertEquals(1, collectedOutputs.size());
+        assertEquals("user_redis_v1", collectedOutputs.get(0).key);
+        assertEquals(350.0, collectedOutputs.get(0).totalSum, 0.001);
+        assertEquals("active_external", collectedOutputs.get(0).attributes.get("tier"));
+        assertEquals("EU", collectedOutputs.get(0).attributes.get("region")); // Preserved legacy attribute
+
+        // Verify Redis store received the updated byte payload without touching Flink native savepoints
+        verify(mockRedisStore, times(1)).put(eq("user_redis_v1"), any(byte[].class));
     }
 }
