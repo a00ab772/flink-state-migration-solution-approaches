@@ -5,6 +5,8 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.shaded.com.fasterxml.jackson.databind.JsonNode;
+import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,7 +53,7 @@ public class StateMigrationBlueGreenKafkaMockTest {
         mockKafkaSourceStream
                 .keyBy(jsonStr -> {
                     try {
-                        com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(jsonStr);
+                        JsonNode node = new ObjectMapper().readTree(jsonStr);
                         return node.get("key").asText();
                     } catch (Exception e) {
                         return "unknown_key";
