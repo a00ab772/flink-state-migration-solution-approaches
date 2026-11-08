@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "AvroAggregateState",
+  "namespace": "com.statemigration.flink.avro",
+  "fields": [
+    {
+      "name": "total",
+      "type": "double",
+      "doc": "Historical total sum accumulated in V1"
+    },
+    {
+      "name": "newConfigurableField",
+      "type": ["null", "string"],
+      "default": null,
+      "doc": "Evolved field introduced in V2 schema"
+    }
+  ]
+}

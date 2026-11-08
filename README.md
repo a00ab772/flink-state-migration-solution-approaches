@@ -12,7 +12,7 @@ This project explores various approaches to state migration in Flink, aiming to 
 
 # Strategies to solve the problem
 
-## 1. **Custom State Migration Logic**: Implementing custom logic to transform state from the old schema to the new schema during the restore process.
+## 1. Custom State Migration Logic: Implementing custom logic to transform state from the old schema to the new schema during the restore process.
 
 If the state schema changes are minor, you can implement custom state migration logic in your Flink application.
 
@@ -28,7 +28,7 @@ This involves writing code that reads the old state format and transforms it int
 
 [UpcastingJobTest.java](src/test/java/com/statemigration/flink/upcasting/UpcastingJobTest.java)
 
-## 2. **state agnostic abstract dsl architecture**: Designing your application to be agnostic to state schema changes by using an abstract DSL that decouples the state representation from the application logic.
+## 2. state agnostic abstract dsl architecture: Designing your application to be agnostic to state schema changes by using an abstract DSL that decouples the state representation from the application logic.
 
 Instead of mapping user configs directly to complex, strongly-typed Flink stateful operators (which forces state schema changes whenever the config changes), abstract the runtime into a fixed, generic state topology.
 
@@ -42,7 +42,7 @@ Instead of mapping user configs directly to complex, strongly-typed Flink statef
 
 [GenericDslJobTest.java](src/test/java/com/statemigration/flink/schemaagnostic/GenericDslJobTest.java)
 
-## 3. **Externalized State Management**: Storing state externally in a database or key-value store, allowing for more flexible schema evolution.
+## 3. Externalized State Management: Storing state externally in a database or key-value store, allowing for more flexible schema evolution.
 
 Moving complex or frequently migrated state out of Flink's native managed state and into an external, schema-flexible key-value store (such as Redis, DynamoDB, or PostgreSQL) can bypass Flink's rigid state serialization constraints.
 
@@ -56,7 +56,7 @@ Moving complex or frequently migrated state out of Flink's native managed state 
 
 [ExternalizedStateJobTest.java](src/test/java/com/statemigration/flink/externalstore/ExternalizedStateJobTest.java)
 
-## 4. **Dual-pipeline blue-green state migration**: Running two parallel pipelines (old and new) during a migration period, allowing for gradual state transfer and validation.
+## 4. Dual-pipeline blue-green state migration: Running two parallel pipelines (old and new) during a migration period, allowing for gradual state transfer and validation.
 
 When a configuration change introduces a breaking state change (e.g., changing the windowing strategy or reshaping the aggregate key entirely), upcasting is impossible. You must migrate the data cleanly.
 
@@ -82,7 +82,7 @@ Of course this approach also comes with a Trade-off: It introduces operational c
 
 [StateMigrationBlueGreenJobTest.java](src/main/java/com/statemigration/flink/bluegreen/StateMigrationBlueGreenJobTest.java)
 
-## 5. **Versioned State**: Maintaining multiple versions of state and handling them appropriately during restore.
+## 5. Versioned State: Maintaining multiple versions of state and handling them appropriately during restore.
 
 This approach handles schema evolution seamlessly in Apache Flink by wrapping domain state with a explicit schema version indicator (like the StateWrapper<T> pattern we used earlier).
 
@@ -96,7 +96,7 @@ Pros:
 
 Cons:
 
-* ConsBoilerplate Overhead: Every state object must be wrapped inside a generic container (StateWrapper<T>), requiring extra code for serialization and casting.
+* Boilerplate Overhead: Every state object must be wrapped inside a generic container (StateWrapper<T>), requiring extra code for serialization and casting.
 * Maintenance Debt: As your application evolves through multiple versions (V1 -> V2 -> V3 -> V4), the upcasting logic can accumulate nested conditional blocks.
 * Requires Restart/Savepoint: To apply the migration, you must stop the pipeline, take a savepoint, update the code with the new version handler, and restore.
 
@@ -106,11 +106,28 @@ Cons:
 
 [VersionedStateTest.java](src/test/java/com/statemigration/flink/versionedstate/VersionedStateTest.java)
 
+## 6. State Serialization: Using a serialization framework that supports schema evolution, such as Avro or Protobuf.
+
+This strategy delegates schema evolution entirely to a robust binary serialization framework (like Apache Avro) rather than handling versioning manually inside application code. By defining state records through formal schemas with defined field defaults (e.g., adding `newConfigurableField` with a default value), Avro's schema resolution engine automatically manages backward and forward compatibility at the byte level during Flink savepoint restoration.
+
+Pros:
+
+* Zero Application Boilerplate: Eliminates the need for manual `StateWrapper` classes and conditional `if-else` upcasting blocks inside Flink stateful functions.
+* Built-in Compatibility Enforcement: Strict schema definition rules ensure that data structures can evolve safely without silent corruption or unexpected runtime crashes.
+* Compact & Performant Binary Footprint: Reduces memory and checkpoint storage overhead significantly compared to verbose JSON or standard Java serialization.
+
+Cons
+
+* Strict Compatibility Rules: Breaking core schema rules (such as removing a field without providing a default value) will cause state restoration to fail hard.
+* Build Pipeline Complexity: Requires managing external schema files (`.avsc`) and configuration plugins to handle schema compilation and class generation.
+
+[AvroStateSerializationJob.java](src/main/java/com/statemigration/flink/serialization/avro/AvroStateSerializationJob.java)
+
+[AvroStateSerializationJobTest.java](src/test/java/com/statemigration/flink/serialization/avro/AvroStateSerializationJobTest.java)
+
 (Work in progress ....)
 
-## 6. **State Serialization**: Using a serialization framework that supports schema evolution, such as Avro or Protobuf.
-
-## 7. **State Migration Tooling**: Leveraging Flink's state migration tooling, such as the State Processor API, to facilitate state migration.
+## 7. State Migration Tooling: Leveraging Flink's state migration tooling, such as the State Processor API, to facilitate state migration.
 
 ...
 
